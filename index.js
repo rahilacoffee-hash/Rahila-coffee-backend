@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import connectDB from "./config/connectDb.js";
+
 import userRouter from "./route/user.route.js";
 import productRouter from "./route/products.route.js";
 import cartRouter from "./route/cart.route.js";
@@ -14,17 +15,23 @@ import reviewRouter from "./route/review.route.js";
 dotenv.config();
 
 const app = express();
+
+/* ---------------- CORS FIX ---------------- */
 app.use(cors({
   origin: [
     "http://localhost:5173",
-    "https://rahila-coffee-frontend-o98kgv6kb-rahilacoffee-hashs-projects.vercel.app/",   // ← your Vercel URL
+    "https://rahila-coffee-frontend.vercel.app",
+    "https://rahila-coffee-frontend-o98kgv6kb-rahilacoffee-hashs-projects.vercel.app"
   ],
   credentials: true,
-}))
+}));
+
+app.options("*", cors());
+
 app.use(express.json());
 app.use(cookieParser());
 
-// Routes
+/* ---------------- ROUTES ---------------- */
 app.use("/api/user", userRouter);
 app.use("/api/product", productRouter);
 app.use("/api/cart", cartRouter);
@@ -33,7 +40,9 @@ app.use("/api/admin", adminRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/reviews", reviewRouter);
 
-app.get("/", (req, res) => res.send("Rahila API running"));
+app.get("/", (req, res) => {
+  res.send("Rahila API running 🚀");
+});
 
 const PORT = process.env.PORT || 5000;
 
