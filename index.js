@@ -14,13 +14,13 @@ import reviewRouter from "./route/review.route.js";
 dotenv.config();
 
 const app = express();
-
-app.use(
-  cors({
-    origin: ["http://localhost:5173", "http://localhost:5174"],
-    credentials: true,
-  })
-);
+app.use(cors({
+  origin: [
+    "http://localhost:5173",
+    "https://rahila-coffee.vercel.app",   // ← your Vercel URL
+  ],
+  credentials: true,
+}))
 app.use(express.json());
 app.use(cookieParser());
 
