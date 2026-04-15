@@ -17,7 +17,7 @@ const app = express();
 app.use(cors({
   origin: [
     "http://localhost:5173",
-    "https://rahila-coffee-frontend-okfqu7boc-rahilacoffee-hashs-projects.vercel.app/",   // ← your Vercel URL
+    "https://rahila-coffee-frontend-o98kgv6kb-rahilacoffee-hashs-projects.vercel.app/",   // ← your Vercel URL
   ],
   credentials: true,
 }))
