@@ -1,88 +1,136 @@
-import Stripe from "stripe"
-import OrderModel from "../models/order.model.js"
+// controllers/order.controller.js
+import Stripe           from "stripe"
+import OrderModel       from "../models/order.model.js"
 import CartProductModel from "../models/cartproduct.model.js"
-import ProductModel from "../models/product.model.js"
-import UserModel from "../models/user.model.js"
-import AddressModel from "../models/address.model.js"  // ✅ Import Address model
+import ProductModel     from "../models/product.model.js"
+import UserModel        from "../models/user.model.js"
+import sendEmail        from "../config/sendEmail.js"
+import orderConfirmationEmail from "../utils/orderConfirmationEmail.js"
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
-// ────────────── CREATE PAYMENT INTENT ──────────────
+// ── CREATE PAYMENT INTENT ──────────────────────────────────────
 export async function createPaymentIntent(req, res) {
   try {
-    const userId = req.userId
+    const userId    = req.userId
     const cartItems = await CartProductModel.find({ userId }).populate("productId")
-    if (!cartItems.length)
-      return res.status(400).json({ message: "Cart is empty", error: true, success: false })
 
-    const totalAmt = cartItems.reduce((sum, item) => sum + (item.productId.price * item.quantity), 0)
+    if (!cartItems || cartItems.length === 0) {
+      return res.status(400).json({
+        message: "Your cart is empty. Add products before checkout.",
+        error: true, success: false,
+      })
+    }
+
+    const validItems = cartItems.filter(item => item.productId)
+    const totalAmt   = validItems.reduce(
+      (sum, item) => sum + item.productId.price * item.quantity, 0
+    )
 
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(totalAmt * 100),
+      amount:   Math.round(totalAmt * 100),
       currency: "usd",
-      metadata: { userId: userId.toString() }
+      metadata: { userId: userId.toString() },
     })
 
-    return res.json({ clientSecret: paymentIntent.client_secret, totalAmt, success: true, error: false })
+    return res.json({
+      clientSecret: paymentIntent.client_secret,
+      totalAmt,
+      success: true,
+      error:   false,
+    })
   } catch (error) {
+    console.error("Payment intent error:", error.message)
     return res.status(500).json({ message: error.message, error: true, success: false })
   }
 }
 
-// ────────────── PLACE ORDER ──────────────
+// ── PLACE ORDER + SEND CONFIRMATION EMAIL ─────────────────────
 export async function placeOrder(req, res) {
   try {
-    const userId = req.userId
+    const userId          = req.userId
     const { paymentId, delivery_address } = req.body
 
+    // Get cart items
     const cartItems = await CartProductModel.find({ userId }).populate("productId")
-    if (!cartItems.length)
+    if (!cartItems || cartItems.length === 0) {
       return res.status(400).json({ message: "Cart is empty", error: true, success: false })
-
-    // ✅ STEP 1: Save address first
-    const newAddress = await AddressModel.create({
-      userId,
-      ...delivery_address
-    })
-
-    const subTotalAmt = cartItems.reduce((sum, item) => sum + item.productId.price * item.quantity, 0)
-    const orders = []
-
-    // ✅ STEP 2: Save each order with address _id
-    for (const item of cartItems) {
-      const order = new OrderModel({
-        userId,
-        orderId: `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        productId: item.productId._id,
-        product_details: { name: item.productId.name, image: item.productId.images },
-        paymentId,
-        payment_status: "paid",
-        delivery_address: newAddress._id, // 👈 store ObjectId
-        subTotalAmt,
-        totalAmt: subTotalAmt
-      })
-
-      const saved = await order.save()
-      orders.push(saved)
-
-      await ProductModel.findByIdAndUpdate(item.productId._id, { $inc: { countInStock: -item.quantity } })
     }
 
-    await UserModel.findByIdAndUpdate(userId, { $push: { orderHistory: { $each: orders.map(o => o._id) } } })
+    // Get user details for email
+    const user = await UserModel.findById(userId)
+
+    const validItems = cartItems.filter(item => item.productId)
+    const totalAmt   = validItems.reduce(
+      (sum, item) => sum + item.productId.price * item.quantity, 0
+    )
+
+    // Create one order per cart item
+    const createdOrders = []
+    for (const item of validItems) {
+      const orderId = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+
+      const order = await OrderModel.create({
+        userId,
+        orderId,
+        productId:       item.productId._id,
+        product_details: {
+          name:  item.productId.name,
+          image: item.productId.images,
+        },
+        paymentId,
+        payment_status:  "paid",
+        delivery_address,
+        subTotalAmt:     item.productId.price * item.quantity,
+        totalAmt:        totalAmt + 5, // +$5 shipping
+      })
+
+      createdOrders.push(order)
+    }
+
+    // Clear cart
     await CartProductModel.deleteMany({ userId })
 
-    return res.status(201).json({ message: "Order placed", data: orders, success: true })
+    // ── Send confirmation email to user ───────────────────────
+    if (user?.email) {
+      const firstItem = validItems[0]
+      try {
+        await sendEmail({
+          sendTo:  user.email,
+          subject: `✅ Order Confirmed — ${createdOrders[0].orderId}`,
+          html:    orderConfirmationEmail({
+            userName:        user.name,
+            orderId:         createdOrders[0].orderId,
+            productName:     firstItem.productId.name,
+            productImage:    firstItem.productId.images?.[0] || "",
+            totalAmt:        totalAmt + 5,
+            deliveryAddress: delivery_address,
+          }),
+        })
+        console.log("✅ Order confirmation email sent to:", user.email)
+      } catch (emailErr) {
+        // Don't fail the order if email fails — just log
+        console.error("❌ Failed to send confirmation email:", emailErr.message)
+      }
+    }
+
+    return res.json({
+      message: "Order placed successfully",
+      data:    createdOrders,
+      success: true,
+      error:   false,
+    })
   } catch (error) {
-    return res.status(500).json({ message: error.message, error: true })
+    console.error("Place order error:", error.message)
+    return res.status(500).json({ message: error.message, error: true, success: false })
   }
 }
 
-// ────────────── GET MY ORDERS ──────────────
+// ── GET MY ORDERS ──────────────────────────────────────────────
 export async function getMyOrders(req, res) {
   try {
-    const orders = await OrderModel.find({ userId: req.userId })
-      .populate("productId")
-      .populate("delivery_address") // ✅ This now populates the saved address
+    const orders = await OrderModel
+      .find({ userId: req.userId })
       .sort({ createdAt: -1 })
 
     return res.json({ data: orders, success: true, error: false })
@@ -90,4 +138,3 @@ export async function getMyOrders(req, res) {
     return res.status(500).json({ message: error.message, error: true, success: false })
   }
 }
-
