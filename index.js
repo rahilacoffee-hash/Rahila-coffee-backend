@@ -20,15 +20,23 @@ const app = express();
 
 
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "https://rahila-coffee-frontend-m5mnqkm88-rahilacoffee-hashs-projects.vercel.app",
-  ],
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+
+    // allow localhost
+    if (origin.includes("localhost")) {
+      return callback(null, true);
+    }
+
+    // allow ALL vercel deployments
+    if (origin.includes("vercel.app")) {
+      return callback(null, true);
+    }
+
+    return callback(null, false);
+  },
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-}))
+}));
 
 // This line is also required — add it right after cors()
 app.options("*", cors())
