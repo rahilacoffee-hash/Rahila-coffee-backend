@@ -3,107 +3,91 @@ import OrderModel from "../models/order.model.js"
 import CartProductModel from "../models/cartproduct.model.js"
 import ProductModel from "../models/product.model.js"
 import UserModel from "../models/user.model.js"
-import AddressModel from "../models/address.model.js"
-import sendEmail from "../config/sendEmail.js"
-import orderConfirmationEmail from "../utils/orderConfirmationEmail.js"
+import AddressModel from "../models/address.model.js"  // ✅ Import Address model
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
-// ── PLACE ORDER ─────────────────────────────────────────────
+// ────────────── CREATE PAYMENT INTENT ──────────────
+export async function createPaymentIntent(req, res) {
+  try {
+    const userId = req.userId
+    const cartItems = await CartProductModel.find({ userId }).populate("productId")
+    if (!cartItems.length)
+      return res.status(400).json({ message: "Cart is empty", error: true, success: false })
+
+    const totalAmt = cartItems.reduce((sum, item) => sum + (item.productId.price * item.quantity), 0)
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(totalAmt * 100),
+      currency: "usd",
+      metadata: { userId: userId.toString() }
+    })
+
+    return res.json({ clientSecret: paymentIntent.client_secret, totalAmt, success: true, error: false })
+  } catch (error) {
+    return res.status(500).json({ message: error.message, error: true, success: false })
+  }
+}
+
+// ────────────── PLACE ORDER ──────────────
 export async function placeOrder(req, res) {
   try {
     const userId = req.userId
     const { paymentId, delivery_address } = req.body
 
-    // ✅ validate address (IMPORTANT FIX)
-    const address = await AddressModel.findById(delivery_address)
-
-    if (!address) {
-      return res.status(400).json({
-        message: "Invalid delivery address",
-        error: true,
-        success: false
-      })
-    }
-
-    // Get cart items
     const cartItems = await CartProductModel.find({ userId }).populate("productId")
+    if (!cartItems.length)
+      return res.status(400).json({ message: "Cart is empty", error: true, success: false })
 
-    if (!cartItems || cartItems.length === 0) {
-      return res.status(400).json({
-        message: "Cart is empty",
-        error: true,
-        success: false
-      })
-    }
+    // ✅ STEP 1: Save address first
+    const newAddress = await AddressModel.create({
+      userId,
+      ...delivery_address
+    })
 
-    const validItems = cartItems.filter(item => item.productId)
+    const subTotalAmt = cartItems.reduce((sum, item) => sum + item.productId.price * item.quantity, 0)
+    const orders = []
 
-    const totalAmt = validItems.reduce(
-      (sum, item) => sum + item.productId.price * item.quantity,
-      0
-    )
-
-    const createdOrders = []
-
-    for (const item of validItems) {
-      const orderId = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`
-
-      const order = await OrderModel.create({
+    // ✅ STEP 2: Save each order with address _id
+    for (const item of cartItems) {
+      const order = new OrderModel({
         userId,
-        orderId,
+        orderId: `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         productId: item.productId._id,
-        product_details: {
-          name: item.productId.name,
-          image: item.productId.images,
-        },
+        product_details: { name: item.productId.name, image: item.productId.images },
         paymentId,
         payment_status: "paid",
-
-        // ✅ FIXED: store ObjectId only
-        delivery_address: address._id,
-
-        subTotalAmt: item.productId.price * item.quantity,
-        totalAmt: totalAmt + 5,
+        delivery_address: newAddress._id, // 👈 store ObjectId
+        subTotalAmt,
+        totalAmt: subTotalAmt
       })
 
-      createdOrders.push(order)
+      const saved = await order.save()
+      orders.push(saved)
+
+      await ProductModel.findByIdAndUpdate(item.productId._id, { $inc: { countInStock: -item.quantity } })
     }
 
-    // Clear cart
+    await UserModel.findByIdAndUpdate(userId, { $push: { orderHistory: { $each: orders.map(o => o._id) } } })
     await CartProductModel.deleteMany({ userId })
 
-    // Send email
-    const user = await UserModel.findById(userId)
-
-    if (user?.email && createdOrders.length > 0) {
-      await sendEmail({
-        sendTo: user.email,
-        subject: `Order Confirmed — ${createdOrders[0].orderId}`,
-        html: orderConfirmationEmail({
-          userName: user.name,
-          orderId: createdOrders[0].orderId,
-          productName: validItems[0].productId.name,
-          productImage: validItems[0].productId.images?.[0] || "",
-          totalAmt: totalAmt + 5,
-          deliveryAddress: `${address.street}, ${address.city}, ${address.country}`
-        }),
-      })
-    }
-
-    return res.json({
-      message: "Order placed successfully",
-      data: createdOrders,
-      success: true,
-      error: false,
-    })
-
+    return res.status(201).json({ message: "Order placed", data: orders, success: true })
   } catch (error) {
-    console.error("Place order error:", error)
-    return res.status(500).json({
-      message: error.message,
-      error: true,
-      success: false
-    })
+    return res.status(500).json({ message: error.message, error: true })
   }
 }
+
+// ────────────── GET MY ORDERS ──────────────
+export async function getMyOrders(req, res) {
+  try {
+    const orders = await OrderModel.find({ userId: req.userId })
+      .populate("productId")
+      .populate("delivery_address") // ✅ This now populates the saved address
+      .sort({ createdAt: -1 })
+
+    return res.json({ data: orders, success: true, error: false })
+  } catch (error) {
+    return res.status(500).json({ message: error.message, error: true, success: false })
+  }
+}
+
