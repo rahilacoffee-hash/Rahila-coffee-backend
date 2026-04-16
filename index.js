@@ -16,30 +16,19 @@ dotenv.config();
 
 const app = express();
 
-/* ---------------- CORS FIX ---------------- */
+/* ---------------- FIXED CORS ---------------- */
 
+app.use(
+  cors({
+    origin: true, // ✅ allows all origins (best for deployment debugging)
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-
-    // allow localhost
-    if (origin.includes("localhost")) {
-      return callback(null, true);
-    }
-
-    // allow ALL vercel deployments
-    if (origin.includes("vercel.app")) {
-      return callback(null, true);
-    }
-
-    return callback(null, false);
-  },
-  credentials: true,
-}));
-
-// This line is also required — add it right after cors()
-app.options("*", cors())
+/* IMPORTANT: preflight support */
+app.options("*", cors());
 
 app.use(express.json());
 app.use(cookieParser());
