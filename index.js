@@ -23,7 +23,7 @@ app.use(cors({
   origin: [
     "http://localhost:5173",
     "http://localhost:3000",
-    "https://rahila-coffee-frontend-ld0kge04a-rahilacoffee-hashs-projects.vercel.app",
+    "https://rahila-coffee-frontend-m5mnqkm88-rahilacoffee-hashs-projects.vercel.app",
   ],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
