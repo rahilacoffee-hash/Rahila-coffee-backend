@@ -1,190 +1,93 @@
-import Stripe from "stripe";
-import OrderModel from "../models/order.model.js";
-import CartProductModel from "../models/cartproduct.model.js";
-import UserModel from "../models/user.model.js";
-import { sendEmail } from "../config/emailService.js";
+import Stripe from "stripe"
+import OrderModel from "../models/order.model.js"
+import CartProductModel from "../models/cartproduct.model.js"
+import ProductModel from "../models/product.model.js"
+import UserModel from "../models/user.model.js"
+import AddressModel from "../models/address.model.js"  // ✅ Import Address model
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
-/* ================= CREATE PAYMENT INTENT ================= */
+// ────────────── CREATE PAYMENT INTENT ──────────────
 export async function createPaymentIntent(req, res) {
   try {
-    const userId = req.userId;
+    const userId = req.userId
+    const cartItems = await CartProductModel.find({ userId }).populate("productId")
+    if (!cartItems.length)
+      return res.status(400).json({ message: "Cart is empty", error: true, success: false })
 
-    const cartItems = await CartProductModel.find({ userId }).populate("productId");
-
-    const validItems = cartItems.filter(i => i.productId);
-
-    if (validItems.length === 0) {
-      return res.status(400).json({
-        message: "Cart is empty",
-        success: false,
-        error: true
-      });
-    }
-
-    const totalAmt = validItems.reduce(
-      (sum, item) => sum + item.productId.price * item.quantity,
-      0
-    );
+    const totalAmt = cartItems.reduce((sum, item) => sum + (item.productId.price * item.quantity), 0)
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(totalAmt * 100),
       currency: "usd",
-      metadata: {
-        userId: String(userId),
-      },
-    });
+      metadata: { userId: userId.toString() }
+    })
 
-    return res.json({
-      clientSecret: paymentIntent.client_secret,
-      totalAmt,
-      success: true,
-      error: false,
-    });
-
-  } catch (err) {
-    console.error("createPaymentIntent error:", err);
-    return res.status(500).json({
-      message: err.message,
-      success: false,
-      error: true,
-    });
+    return res.json({ clientSecret: paymentIntent.client_secret, totalAmt, success: true, error: false })
+  } catch (error) {
+    return res.status(500).json({ message: error.message, error: true, success: false })
   }
 }
 
-/* ================= PLACE ORDER ================= */
+// ────────────── PLACE ORDER ──────────────
 export async function placeOrder(req, res) {
   try {
-    const userId = req.userId;
-    const { paymentId, delivery_address } = req.body;
+    const userId = req.userId
+    const { paymentId, delivery_address } = req.body
 
-    if (!paymentId) {
-      return res.status(400).json({
-        message: "Missing paymentId",
-        success: false,
-        error: true,
-      });
-    }
+    const cartItems = await CartProductModel.find({ userId }).populate("productId")
+    if (!cartItems.length)
+      return res.status(400).json({ message: "Cart is empty", error: true, success: false })
 
-    const cartItems = await CartProductModel.find({ userId }).populate("productId");
+    // ✅ STEP 1: Save address first
+    const newAddress = await AddressModel.create({
+      userId,
+      ...delivery_address
+    })
 
-    const validItems = cartItems.filter(i => i.productId);
+    const subTotalAmt = cartItems.reduce((sum, item) => sum + item.productId.price * item.quantity, 0)
+    const orders = []
 
-    if (validItems.length === 0) {
-      return res.status(400).json({
-        message: "Cart is empty",
-        success: false,
-        error: true,
-      });
-    }
-
-    const user = await UserModel.findById(userId);
-
-    const subTotalAmt = validItems.reduce(
-      (sum, item) => sum + item.productId.price * item.quantity,
-      0
-    );
-
-    const shipping = 5;
-    const totalAmt = subTotalAmt + shipping;
-
-    const createdOrders = [];
-
-    for (const item of validItems) {
-      const order = await OrderModel.create({
+    // ✅ STEP 2: Save each order with address _id
+    for (const item of cartItems) {
+      const order = new OrderModel({
         userId,
         orderId: `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         productId: item.productId._id,
-        product_details: {
-          name: item.productId.name,
-          image: item.productId.images?.[0] || "",
-        },
+        product_details: { name: item.productId.name, image: item.productId.images },
         paymentId,
         payment_status: "paid",
-        delivery_address: delivery_address || {},
-        subTotalAmt: item.productId.price * item.quantity,
-        totalAmt,
-      });
+        delivery_address: newAddress._id, // 👈 store ObjectId
+        subTotalAmt,
+        totalAmt: subTotalAmt
+      })
 
-      createdOrders.push(order);
+      const saved = await order.save()
+      orders.push(saved)
+
+      await ProductModel.findByIdAndUpdate(item.productId._id, { $inc: { countInStock: -item.quantity } })
     }
 
-    await CartProductModel.deleteMany({ userId });
+    await UserModel.findByIdAndUpdate(userId, { $push: { orderHistory: { $each: orders.map(o => o._id) } } })
+    await CartProductModel.deleteMany({ userId })
 
-    /* ================= EMAIL ================= */
-    if (user?.email && createdOrders.length > 0) {
-      const orderId = createdOrders[0].orderId;
-
-      const html = `
-      <div style="font-family:Arial;max-width:600px;margin:auto">
-        <h2>☕ Order Confirmed</h2>
-        <p>Hi ${user.name}, your order has been placed successfully.</p>
-
-        <p><b>Order ID:</b> ${orderId}</p>
-        <p><b>Total:</b> $${totalAmt.toFixed(2)}</p>
-
-        <hr/>
-
-        <p><b>Delivery Address</b></p>
-        <p>
-          ${delivery_address?.street || ""}<br/>
-          ${delivery_address?.city || ""}<br/>
-          ${delivery_address?.zip || ""}<br/>
-          ${delivery_address?.country || ""}
-        </p>
-
-        <br/>
-        <p>Thanks for shopping with Rahila Coffee ☕</p>
-      </div>
-      `;
-
-      try {
-        await sendEmail(
-          user.email,
-          `Order Confirmed - ${orderId}`,
-          `Your order ${orderId} is confirmed.`,
-          html
-        );
-      } catch (emailErr) {
-        console.error("Email error:", emailErr.message);
-      }
-    }
-
-    return res.status(201).json({
-      message: "Order placed successfully",
-      data: createdOrders,
-      success: true,
-      error: false,
-    });
-
-  } catch (err) {
-    console.error("placeOrder error:", err);
-    return res.status(500).json({
-      message: err.message,
-      success: false,
-      error: true,
-    });
+    return res.status(201).json({ message: "Order placed", data: orders, success: true })
+  } catch (error) {
+    return res.status(500).json({ message: error.message, error: true })
   }
 }
 
-/* ================= GET ORDERS ================= */
+// ────────────── GET MY ORDERS ──────────────
 export async function getMyOrders(req, res) {
   try {
     const orders = await OrderModel.find({ userId: req.userId })
-      .sort({ createdAt: -1 });
+      .populate("productId")
+      .populate("delivery_address") // ✅ This now populates the saved address
+      .sort({ createdAt: -1 })
 
-    return res.json({
-      data: orders,
-      success: true,
-      error: false,
-    });
-
-  } catch (err) {
-    return res.status(500).json({
-      message: err.message,
-      success: false,
-      error: true,
-    });
+    return res.json({ data: orders, success: true, error: false })
+  } catch (error) {
+    return res.status(500).json({ message: error.message, error: true, success: false })
   }
 }
+
