@@ -17,17 +17,21 @@ dotenv.config();
 const app = express();
 
 /* ---------------- CORS FIX ---------------- */
+
+
 app.use(cors({
   origin: [
     "http://localhost:5173",
-    "http://localhost:5174",  // 🔥 ADD THIS
-    "https://rahila-coffee-frontend.vercel.app",
-    "https://rahila-coffee-frontend-o98kgv6kb-rahilacoffee-hashs-projects.vercel.app"
+    "http://localhost:3000",
+    "https://rahila-coffee-frontend-ld0kge04a-rahilacoffee-hashs-projects.vercel.app",
   ],
   credentials: true,
-}));
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}))
 
-app.options("*", cors());
+// This line is also required — add it right after cors()
+app.options("*", cors())
 
 app.use(express.json());
 app.use(cookieParser());
