@@ -20,6 +20,7 @@ const app = express();
 app.use(cors({
   origin: [
     "http://localhost:5173",
+    "http://localhost:5174",  // 🔥 ADD THIS
     "https://rahila-coffee-frontend.vercel.app",
     "https://rahila-coffee-frontend-o98kgv6kb-rahilacoffee-hashs-projects.vercel.app"
   ],
