@@ -2,19 +2,21 @@ import mongoose from "mongoose";
 import dotenv from "dotenv";
 dotenv.config();
 
-if (!process.env.MONGODB_URI) {
-  throw new Error("please provide MONGODB_URI in the .env file");
-}
-
-async function connectDB() {
+const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGODB_URI);
-    console.log("connect DB");
+    if (!process.env.MONGODB_URI) {
+      throw new Error("MONGODB_URI missing in env");
+    }
+
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 15000,
+    });
+
+    console.log("✅ MongoDB connected");
   } catch (error) {
-    console.log("Mongodb connect error", error);
+    console.error("❌ MongoDB connection error:", error.message);
     process.exit(1);
   }
-}
+};
 
 export default connectDB;
-

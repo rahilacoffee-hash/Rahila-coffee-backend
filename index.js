@@ -16,25 +16,33 @@ dotenv.config();
 
 const app = express();
 
+/* ---------------- TRUST PROXY (IMPORTANT for Render) ---------------- */
+app.set("trust proxy", 1);
+
 /* ---------------- CORS FIX ---------------- */
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:3000",
+      "https://rahila-coffee-frontend-5al3dzms2-rahilacoffee-hashs-projects.vercel.app",
+    ],
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
+app.options("*", cors());
 
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "https://rahila-coffee-frontend-5al3dzms2-rahilacoffee-hashs-projects.vercel.app",
-  ],
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-}))
-
-// This line is also required — add it right after cors()
-app.options("*", cors())
-
-app.use(express.json());
+/* ---------------- BODY PARSER ---------------- */
+app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
+
+/* ---------------- HEALTH CHECK (CRITICAL) ---------------- */
+app.get("/health", (req, res) => {
+  res.status(200).json({ success: true, message: "API is running" });
+});
 
 /* ---------------- ROUTES ---------------- */
 app.use("/api/user", userRouter);
@@ -49,10 +57,29 @@ app.get("/", (req, res) => {
   res.send("Rahila API running 🚀");
 });
 
-const PORT = process.env.PORT || 5000;
-
-connectDB().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+/* ---------------- ERROR HANDLER (IMPORTANT) ---------------- */
+app.use((err, req, res, next) => {
+  console.error("🔥 Server Error:", err);
+  res.status(500).json({
+    success: false,
+    message: "Internal server error",
   });
 });
+
+/* ---------------- START SERVER SAFELY ---------------- */
+const PORT = process.env.PORT || 5000;
+
+const startServer = async () => {
+  try {
+    await connectDB();
+
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error("❌ Failed to start server:", err.message);
+    process.exit(1);
+  }
+};
+
+startServer();
