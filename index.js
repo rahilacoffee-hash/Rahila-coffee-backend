@@ -19,20 +19,31 @@ const app = express();
 /* ---------------- TRUST PROXY (IMPORTANT for Render) ---------------- */
 app.set("trust proxy", 1);
 
-/* ---------------- CORS FIX ---------------- */
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:3000",
-      "https://rahila-coffee-frontend-5al3dzms2-rahilacoffee-hashs-projects.vercel.app",
-    ],
+    origin: function (origin, callback) {
+      const allowedOrigins = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://rahila-coffee.vercel.app", // your main domain
+      ];
+
+      // Allow any Vercel preview deployment for your project
+      if (
+        !origin ||
+        allowedOrigins.includes(origin) ||
+        /https:\/\/rahila-coffee.*\.vercel\.app/.test(origin)
+      ) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-
 app.options("*", cors());
 
 /* ---------------- BODY PARSER ---------------- */
