@@ -23,9 +23,9 @@ app.use(
   cors({
     origin: function (origin, callback) {
       const allowedOrigins = [
-        "http://localhost:5173",
+        "http://localhost:5174",
         "http://localhost:3000",
-        "https://rahila-coffee-frontend-dusky.vercel.app", // your main domain
+        "https://rahila-coffee-frontend-sewd.vercel.app", // your main domain
       ];
 
       // Allow any Vercel preview deployment for your project
