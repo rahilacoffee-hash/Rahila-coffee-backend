@@ -25,7 +25,7 @@ app.use(
       const allowedOrigins = [
         "http://localhost:5173",
         "http://localhost:3000",
-        "https://rahila-coffeeee.vercel.app", // your main domain
+        "https://rahilaa-coffee.vercel.app", // your main domain
       ];
 
       // Allow any Vercel preview deployment for your project
